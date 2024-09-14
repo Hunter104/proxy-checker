@@ -9,4 +9,4 @@ find_package(Threads REQUIRED)
 
 add_executable(proxy_checker src/main.c ./src/proxy.c ./src/memory.c)
 target_include_directories(proxy_checker PRIVATE include)
-target_link_libraries(proxy_checker PRIVATE curl Threads::Threads)
+target_link_libraries(proxy_checker PRIVATE curl cjson Threads::Threads)
