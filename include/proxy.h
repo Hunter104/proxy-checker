@@ -1,10 +1,13 @@
 #pragma once
 #include <stdbool.h>
 #include <inttypes.h>
+#include <stdint.h>
+#define URL_MAX_SIZE 50
+#define IP_MAX_SIZE 22
 
 typedef struct ProxyAddress {
-  bool alive;
-  uint8_t ipAddress[4];
+  char url[URL_MAX_SIZE];
+  uint32_t ipAddress;
   uint16_t port;
 } ProxyAddress;
 
@@ -14,6 +17,7 @@ typedef struct ProxyVector {
   ProxyAddress *data;
 } ProxyVector;
 
+ProxyAddress CreateProxy(uint32_t ipAddress, uint16_t port);
 ProxyVector *CreateVector();
 void Insert(ProxyVector *vector, ProxyAddress address);
 void freeVector(ProxyVector *vector);

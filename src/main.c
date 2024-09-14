@@ -1,3 +1,5 @@
+#include <unistd.h>
+#include <bits/pthreadtypes.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,9 +10,7 @@
 #include <cjson/cJSON.h>
 #include <pthread.h>
 #include "proxy.h"
-#define URL_MAX_SIZE 31
 #define TEST_URL "https://lumtest.com/myip.json"
-#define TIMEOUT 2000
 
 #define GREEN_TEXT "\033[0;32m"
 #define RED_TEXT "\033[0;31m"
@@ -25,23 +25,23 @@ ProxyVector *ParseProxies(FILE *file) {
 
   while ((nread = getline(&buffer, &len, file)) != -1) {
     buffer[strcspn(buffer, "\n")] = 0;
-    ProxyAddress *address = malloc(sizeof *address);
-    int n = 0;
-    
-    n =sscanf(buffer, "%hhu.%hhu.%hhu.%hhu:%hu", 
-           &address->ipAddress[0], 
-           &address->ipAddress[1],
-           &address->ipAddress[2],
-           &address->ipAddress[3],
-           &address->port);
+    uint32_t ipAddress;
+    uint16_t port;
+
+    uint8_t *bytes = (uint8_t*)(&ipAddress);
+    int n = sscanf(buffer, "%hhu.%hhu.%hhu.%hhu:%hu", 
+           &bytes[0], 
+           &bytes[1],
+           &bytes[2],
+           &bytes[3],
+           &port);
 
     if (n != 5) {
       printf("Error while parsing line {%s}.\n", buffer);
-      free(address);
       continue;
     }
     
-    Insert(vector, *address);
+    Insert(vector, CreateProxy(ipAddress, port));
   }
 
   free(buffer);
@@ -49,28 +49,15 @@ ProxyVector *ParseProxies(FILE *file) {
   return vector;
 }
 
-char *GetUrl(ProxyAddress *address) {
-  char *str = malloc(31*sizeof(char));
-  sprintf(str, "http://%hhu.%hhu.%hhu.%hhu:%hu", address->ipAddress[0], address->ipAddress[1], address->ipAddress[2], address->ipAddress[3], address->port);
-  
-  return str;
-}
-
-
-typedef struct string {
-  char *ptr;
-  size_t len;
-} string;
-
 size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp)
 {
    return size * nmemb;
 }
 
-bool TestProxy(ProxyAddress *address) {
+bool IsProxyAlive(ProxyAddress address) {
   CURL *curl;
   CURLcode res;
-  char *url = GetUrl(address);
+  char *url = address.url; 
 
   curl_global_init(CURL_GLOBAL_DEFAULT);
   curl = curl_easy_init();
@@ -86,37 +73,56 @@ bool TestProxy(ProxyAddress *address) {
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
 
   res = curl_easy_perform(curl);
-  if (res != CURLE_OK) {
-    curl_easy_cleanup(curl);
-    curl_global_cleanup();
-    free(url);
-    return false;
-  }
-
   curl_easy_cleanup(curl);
   curl_global_cleanup();
-  free(url);
-  return true;
+
+  return res == CURLE_OK;
 }
 
-typedef struct {
-  ProxyAddress address;
+typedef enum { WAITING=0, FAIL, SUCCESS } ProxyState;
+
+pthread_mutex_t lock;
+
+typedef struct { ProxyAddress address;
+  ProxyState *states;
   int thread_id;
 } ThreadArgs;
 
 void *TestProxyThread(void *arg) {
   ThreadArgs *args = (ThreadArgs *)arg;
-  char *url = GetUrl(&args->address);
+  bool success = IsProxyAlive(args->address);
 
-  if (TestProxy(&args->address)) {
-    printf(GREEN_TEXT "●" RESET_TEXT "Proxy %s Success!\n", url);
-  } else {
-    printf(RED_TEXT "●" RESET_TEXT "Proxy %s Failure\n", url);
-  }
+  pthread_mutex_lock(&lock);
+  args->states[args->thread_id] = success ? SUCCESS : FAIL;
+  pthread_mutex_unlock(&lock);
 
-  free(url);
   free(args);
   pthread_exit(NULL);
+}
+
+void PrintProxyStates(ProxyState *states, int length, bool done) {
+  for (int i=0; i < length; i++) {
+    pthread_mutex_lock(&lock);
+    
+    printf("\rProxy %d: ", i + 1);
+    switch (states[i]) {
+      case WAITING:
+        printf(RESET_TEXT "WAITING" RESET_TEXT);
+        break;
+      case SUCCESS:
+        printf(GREEN_TEXT "SUCCESS" RESET_TEXT);
+        break;
+      case FAIL:
+        printf(RED_TEXT "FAILURE" RESET_TEXT);
+        break;
+    }
+    pthread_mutex_unlock(&lock);
+
+    printf("\n");
+  }
+
+  if (!done)
+    printf("\033[%dA", length);
 }
 
 int main(int argc, char *argv[])
@@ -134,11 +140,17 @@ int main(int argc, char *argv[])
   ProxyVector *list = ParseProxies(file);
   fclose(file);
 
+  pthread_mutex_init(&lock, NULL);
   pthread_t threads[list->len];
+  ProxyState states[list->len];
+
   for (int i=0; i<list->len; i++) {
     ThreadArgs *args = malloc(sizeof(ThreadArgs));
     args->address = list->data[i];
-    args->thread_id = i + 1;
+    args->thread_id = i;
+
+    states[i] = WAITING;
+    args->states = states;
 
     if (pthread_create(&threads[i], NULL, TestProxyThread, (void *)args)) {
       fprintf(stderr, "Error creating thread %d\n", i + 1);
@@ -146,10 +158,28 @@ int main(int argc, char *argv[])
     }
   }
 
-  for (int i=0; i<list->len; i++) {
-    pthread_join(threads[i], NULL); 
+  while (true) {
+    bool done = true;
+
+    for (int i=0; i < list->len; i++) {
+      if (states[i] == WAITING) {
+        done = false;
+        break;
+      }
+    }
+
+    PrintProxyStates(states, list->len, done);
+    if (done)
+      break;
+    
+    usleep(100000);
   }
 
+  for (int i = 0; i < list->len; i++) {
+    pthread_join(threads[i], NULL);
+  }  
+
+  pthread_mutex_destroy(&lock);
   freeVector(list);
   return EXIT_SUCCESS;
 }

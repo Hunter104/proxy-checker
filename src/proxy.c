@@ -5,8 +5,24 @@
 #include <inttypes.h>
 #include "memory.h"
 #include "proxy.h"
-#define MAX_SIZE 256
 #define INITIAL_CAPACITY 10
+
+uint8_t getByte(uint32_t ipAddress, int n) {
+  int power = 24 - (n << 3);
+  return (ipAddress >> power) & 0xFF;
+}
+
+ProxyAddress CreateProxy(uint32_t ipAddress, uint16_t port) {
+  ProxyAddress proxy;
+  proxy.ipAddress = ipAddress;
+  proxy.port = port;
+
+  uint8_t *bytes = (uint8_t*)(&ipAddress);
+  sprintf(proxy.url, "http://%hhu.%hhu.%hhu.%hhu:%hu",
+          bytes[0], bytes[1], bytes[2], bytes[3], port);
+
+  return proxy;
+}
 
 ProxyVector *CreateVector() {
   ProxyVector *vector = safe_malloc(sizeof *vector);
