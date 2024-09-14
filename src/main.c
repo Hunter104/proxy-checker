@@ -5,9 +5,16 @@
 #include <curl/curl.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <cjson/cJSON.h>
+#include "memory.h"
 #include "proxy.h"
 #define URL_MAX_SIZE 31
 #define TEST_URL "https://lumtest.com/myip.json"
+#define TIMEOUT 2000
+
+#define GREEN_TEXT "\033[0;32m"
+#define RED_TEXT "\033[0;31m"
+#define RESET_TEXT "\033[0m"
 
 ProxyVector *ParseProxies(FILE *file) {
 
@@ -49,6 +56,50 @@ char *GetUrl(ProxyAddress *address) {
   return str;
 }
 
+
+typedef struct string {
+  char *ptr;
+  size_t len;
+} string;
+
+size_t write_data(void *buffer, size_t size, size_t nmemb, void *userp)
+{
+   return size * nmemb;
+}
+
+bool TestProxy(ProxyAddress *address) {
+  CURL *curl;
+  CURLcode res;
+  char *url = GetUrl(address);
+
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+  curl = curl_easy_init();
+  if (!curl) {
+    perror("Failed to initialize libcurl\n");
+    abort();
+  }
+
+  curl_easy_setopt(curl, CURLOPT_URL, TEST_URL);
+  curl_easy_setopt(curl, CURLOPT_PROXY, url);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+
+  res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    fprintf(stderr, "Request failed: %s\n", curl_easy_strerror(res));
+    curl_easy_cleanup(curl);
+    curl_global_cleanup();
+    free(url);
+    return false;
+  }
+
+  curl_easy_cleanup(curl);
+  curl_global_cleanup();
+  free(url);
+  return true;
+}
+
 int main(int argc, char *argv[])
 {
   if (argc < 2) {
@@ -66,7 +117,16 @@ int main(int argc, char *argv[])
 
   for (int i=0; i<list->len; i++) {
     ProxyAddress current = list->data[i];
-    printf("%hhu.%hhu.%hhu.%hhu:%hu\n", current.ipAddress[0], current.ipAddress[1], current.ipAddress[2], current.ipAddress[3], current.port);
+    char *url = GetUrl(&current);
+    printf("Testing proxy %s...\n", url);
+
+    if (TestProxy(&current)) {
+      printf(GREEN_TEXT "●" RESET_TEXT "Success!\n");
+    } else {
+      printf(RED_TEXT "●" RESET_TEXT "Failure\n");
+    }
+
+    free(url);
   }
 
   freeVector(list);
