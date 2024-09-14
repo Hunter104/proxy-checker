@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <cjson/cJSON.h>
-#include "memory.h"
+#include <pthread.h>
 #include "proxy.h"
 #define URL_MAX_SIZE 31
 #define TEST_URL "https://lumtest.com/myip.json"
@@ -100,6 +100,28 @@ bool TestProxy(ProxyAddress *address) {
   return true;
 }
 
+typedef struct {
+  ProxyAddress address;
+  int thread_id;
+} ThreadArgs;
+
+void *TestProxyThread(void *arg) {
+  ThreadArgs *args = (ThreadArgs *)arg;
+  char *url = GetUrl(&args->address);
+
+  printf("Thread %d: Testing proxy %s...\n", args->thread_id, url);
+
+  if (TestProxy(&args->address)) {
+    printf(GREEN_TEXT "●" RESET_TEXT "Thread %d Success!\n", args->thread_id);
+  } else {
+    printf(RED_TEXT "●" RESET_TEXT "Thread %d Failure\n", args->thread_id);
+  }
+
+  free(url);
+  free(args);
+  pthread_exit(NULL);
+}
+
 int main(int argc, char *argv[])
 {
   if (argc < 2) {
@@ -115,18 +137,20 @@ int main(int argc, char *argv[])
   ProxyVector *list = ParseProxies(file);
   fclose(file);
 
+  pthread_t threads[list->len];
   for (int i=0; i<list->len; i++) {
-    ProxyAddress current = list->data[i];
-    char *url = GetUrl(&current);
-    printf("Testing proxy %s...\n", url);
+    ThreadArgs *args = malloc(sizeof(ThreadArgs));
+    args->address = list->data[i];
+    args->thread_id = i + 1;
 
-    if (TestProxy(&current)) {
-      printf(GREEN_TEXT "●" RESET_TEXT "Success!\n");
-    } else {
-      printf(RED_TEXT "●" RESET_TEXT "Failure\n");
+    if (pthread_create(&threads[i], NULL, TestProxyThread, (void *)args)) {
+      fprintf(stderr, "Error creating thread %d\n", i + 1);
+      free(args);
     }
+  }
 
-    free(url);
+  for (int i=0; i<list->len; i++) {
+    pthread_join(threads[i], NULL); 
   }
 
   freeVector(list);
