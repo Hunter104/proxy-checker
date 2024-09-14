@@ -87,7 +87,6 @@ bool TestProxy(ProxyAddress *address) {
 
   res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
-    fprintf(stderr, "Request failed: %s\n", curl_easy_strerror(res));
     curl_easy_cleanup(curl);
     curl_global_cleanup();
     free(url);
@@ -109,12 +108,10 @@ void *TestProxyThread(void *arg) {
   ThreadArgs *args = (ThreadArgs *)arg;
   char *url = GetUrl(&args->address);
 
-  printf("Thread %d: Testing proxy %s...\n", args->thread_id, url);
-
   if (TestProxy(&args->address)) {
-    printf(GREEN_TEXT "●" RESET_TEXT "Thread %d Success!\n", args->thread_id);
+    printf(GREEN_TEXT "●" RESET_TEXT "Proxy %s Success!\n", url);
   } else {
-    printf(RED_TEXT "●" RESET_TEXT "Thread %d Failure\n", args->thread_id);
+    printf(RED_TEXT "●" RESET_TEXT "Proxy %s Failure\n", url);
   }
 
   free(url);
