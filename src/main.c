@@ -15,20 +15,13 @@
 #define RED_TEXT "\033[0;31m"
 #define RESET_TEXT "\033[0m"
 
-typedef struct {
-  ProxyAddress address;
-  int thread_id;
-} ThreadArgs;
-
-void *TestProxyThread(void *arg) {
-  ThreadArgs *args = (ThreadArgs *)arg;
-  char *status = CheckIsProxyAlive(args->address)
-                     ? GREEN_TEXT "Success" RESET_TEXT
-                     : RED_TEXT "Failure" RESET_TEXT;
-  printf("Proxy %s status: %s\n", args->address.url, status);
-
-  free(args);
-  pthread_exit(NULL);
+FILE *safe_fopen(const char *path, const char *mode) {
+  FILE *file = fopen(path, mode);
+  if (!file) {
+    fprintf(stderr, "Failed to open file %s\n", path);
+    abort();
+  }
+  return file;
 }
 
 int main(int argc, char *argv[]) {
@@ -37,29 +30,16 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  FILE *file = fopen(argv[1], "r");
-  if (!file) {
-    fprintf(stderr, "Failed to open file: %s\n", argv[1]);
-    exit(EXIT_FAILURE);
-  }
+  FILE *file = safe_fopen(argv[1], "r");
   ProxyVector *list = GetProxiesFromFile(file);
   fclose(file);
 
-  pthread_t threads[list->len];
-
+#pragma omp parallel for
   for (int i = 0; i < list->len; i++) {
-    ThreadArgs *args = malloc(sizeof(ThreadArgs));
-    args->address = list->data[i];
-    args->thread_id = i;
-
-    if (pthread_create(&threads[i], NULL, TestProxyThread, (void *)args)) {
-      fprintf(stderr, "Error creating thread %d\n", i + 1);
-      free(args);
-    }
-  }
-
-  for (int i = 0; i < list->len; i++) {
-    pthread_join(threads[i], NULL);
+    char *status = CheckIsProxyAlive(list->data[i])
+                       ? GREEN_TEXT "Success" RESET_TEXT
+                       : RED_TEXT "Failure" RESET_TEXT;
+    printf("Proxy %s status: %s\n", list->data[i].url, status);
   }
 
   freeVector(list);

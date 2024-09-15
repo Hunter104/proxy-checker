@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #define INITIAL_CAPACITY 10
-#define TEST_URL "https://lumtest.com/myip.json"
+#define TEST_URL "www.google.com"
 
 uint8_t getByte(uint32_t ipAddress, int n) {
   int power = 24 - (n << 3);
